@@ -1,4 +1,4 @@
-name: Download, Compress, and Upload GSI
+name: Download, Ultra-Compress, and Upload GSI
 
 on:
   workflow_dispatch:
@@ -17,19 +17,21 @@ jobs:
 
       - name: Download GSI
         run: |
-          # Using -L to follow redirects common with SourceForge
-          wget -L -O gsi_file.img "${{ github.event.inputs.file_url }}"
+          # Using -L to follow redirects and -c to resume if interrupted
+          wget -L -c -O gsi_file.img "${{ github.event.inputs.file_url }}"
 
-      - name: Ultra Compress (XZ)
+      - name: Ultra Compress (XZ Extreme)
         run: |
-          # -9 is the highest compression level, -T0 uses all available CPU cores
-          xz -9 -T0 gsi_file.img
-          echo "Compressed size: $(du -h gsi_file.img.xz)"
+          # -9e: Level 9 + Extreme heuristics
+          # -T0: Use all cores (xz will auto-scale based on memory)
+          # --memlimit-compress: Caps usage so the runner doesn't kill the process
+          xz -9e -T0 --memlimit-compress=6000MiB gsi_file.img
+          echo "Final compressed size: $(du -h gsi_file.img.xz)"
 
       - name: Upload to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: compressed-gsi
+          name: ultra-compressed-gsi
           path: gsi_file.img.xz
           retention-days: 1
-
+          compression-level: 0 # We already compressed it, don't waste time re-compressing
