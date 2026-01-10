@@ -1,4 +1,4 @@
-name: GSI Slimmer and Ultra Compressor
+name: GSI Slimmer to 500MB
 
 on:
   workflow_dispatch:
@@ -9,50 +9,55 @@ on:
         type: string
 
 jobs:
-  build:
+  slim-and-compress:
     runs-on: ubuntu-latest
     steps:
-      - name: Free Disk Space
-        run: |
-          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
-          
-      - name: Download GSI
-        run: wget -L -O input.img "${{ github.event.inputs.file_url }}"
+      - name: Cleanup Runner
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
 
-      - name: Slim Down System Image
+      - name: Install Tools
         run: |
-          # Create a mount point
+          sudo apt-get update
+          sudo apt-get install -y android-sdk-libsparse-utils binwalk e2fsprogs
+
+      - name: Download and Prepare Image
+        run: |
+          wget -L -O input.img "${{ github.event.inputs.file_url }}"
+          # Convert Sparse to Raw
+          simg2img input.img raw_system.img || mv input.img raw_system.img
+
+      - name: Mount and Slimming
+        run: |
           mkdir -p mnt
-          # GSIs are usually raw images; we mount them to delete files
-          # Note: If this fails, the image might be 'sparse'. 
-          # We convert to raw first to be safe.
-          sudo apt-get install android-sdk-libsparse-utils -y
-          simg2img input.img raw_input.img || mv input.img raw_input.img
+          # Many GSIs have an offset. We try to mount directly first; if it fails, we use loop.
+          sudo mount -o loop,rw raw_system.img mnt || sudo mount -o loop,offset=1048576,rw raw_system.img mnt
           
-          # Mount the image (Requires offset calculation or standard mount)
-          # We use a tool called 'e2fsck' and 'resize2fs' later to shrink the filesystem
-          sudo mount -o loop raw_input.img mnt
-          
-          # DELETE NON-ESSENTIALS (Customize these paths as needed)
+          # DELETE THE BIGGEST OFFENDERS
+          sudo rm -rf mnt/system/product/app/YouTube || true
+          sudo rm -rf mnt/system/product/app/Chrome || true
+          sudo rm -rf mnt/system/product/app/Maps || true
           sudo rm -rf mnt/system/media/video/* || true
-          sudo rm -rf mnt/system/product/wallpaper/* || true
-          sudo rm -rf mnt/system/product/app/YouTube/* || true
-          sudo rm -rf mnt/system/product/app/Chrome/* || true
           
-          echo "Cleanup finished. Unmounting..."
+          # OPTIONAL: Remove extra fonts/sounds if still too big
+          # sudo rm -rf mnt/system/media/audio/notifications/* || true
+          
           sudo umount mnt
 
-      - name: Ultra Compress (256MB Dictionary)
+      - name: Shrink Filesystem
         run: |
-          # Using the strongest 7z settings possible on a 7GB RAM runner
+          # This removes the "empty air" we just created by deleting files
+          e2fsck -f -y raw_system.img
+          resize2fs -M raw_system.img
+
+      - name: Ultra Compression (256MB Dictionary)
+        run: |
           # -mx=9: Ultra
-          # -md=256m: Massive dictionary to find redundancies across the whole image
-          7z a -mx=9 -m0=lzma2 -md=256m -mfb=273 -ms=on gsi_final.7z raw_input.img
-          echo "Final size: $(du -h gsi_final.7z)"
+          # -md=256m: Max dictionary for best results
+          7z a -mx=9 -m0=lzma2 -md=256m -mfb=273 -ms=on gsi_500mb.7z raw_system.img
+          echo "Final size: $(du -h gsi_500mb.7z)"
 
       - name: Upload
         uses: actions/upload-artifact@v4
         with:
-          name: slim-gsi-500mb-target
-          path: gsi_final.7z
-
+          name: ultra-slim-gsi
+          path: gsi_500mb.7z
