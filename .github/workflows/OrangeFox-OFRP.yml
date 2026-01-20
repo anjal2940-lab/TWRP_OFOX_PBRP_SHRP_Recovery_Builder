@@ -1,16 +1,20 @@
-name: Build LineageOS 22 - m14x
+name: Build LineageOS 22 (m14x)
+
 on:
   workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
     steps:
-      - name: Maximize Build Space (Cleanup)
+      - name: Maximize Build Space (Cleanup & Swap)
         uses: easimon/maximize-build-space@master
         with:
           root-reserve-mb: 2048
-          swap-size-mb: 16384 # 16GB Swap is required for Android 15 linking
+          swap-size-mb: 16384 # 16GB Swap for Android 15 linking
           remove-dotnet: 'true'
           remove-android: 'true'
           remove-haskell: 'true'
@@ -29,26 +33,41 @@ jobs:
           chmod a+x ~/bin/repo
           sudo ln -sf ~/bin/repo /usr/bin/repo
 
-      - name: Sync Source Code
+      - name: Initialize and Sync Source
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
+          
+          # Initialize LineageOS 22.0 (Android 15)
           repo init -u https://github.com/LineageOS/android.git -b lineage-22.0 --git-lfs --depth=1
           
-          # Clone your device tree into the correct path
+          # 1. Device Tree
           git clone https://github.com/devhunter1/android_device_samsung_m14x -b lineage-22.2 device/samsung/m14x
           
-          # Sync only necessary projects to save space
+          # 2. Common Tree (Required by BoardConfig)
+          git clone https://github.com/devhunter1/android_device_samsung_s5e8535-common -b lineage-22.2 device/samsung/s5e8535-common
+          
+          # 3. Kernel Source (Required by BoardConfig)
+          git clone https://github.com/devhunter1/android_kernel_samsung_s5e8535 -b lineage-22.2 kernel/samsung/s5e8535
+          
+          # 4. Vendor Trees (Required for proprietary blobs)
+          git clone https://github.com/devhunter1/android_vendor_samsung_m14x -b lineage-22.2 vendor/samsung/m14x
+          git clone https://github.com/devhunter1/android_vendor_samsung_s5e8535-common -b lineage-22.2 vendor/samsung/s5e8535-common
+
+          # Sync the rest of the source (this will take a while)
           repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
       - name: Build ROM
         run: |
           source build/envsetup.sh
+          # Replace 'lineage_m14x-ap3a-userdebug' if your lunch combo name differs
           lunch lineage_m14x-ap3a-userdebug
           mka bacon -j$(nproc --all)
 
-      - name: Upload Build Artifacts
+      - name: Upload Build
         uses: actions/upload-artifact@v4
         with:
-          name: LineageOS-m14x-Build
-          path: out/target/product/m14x/*.zip
+          name: LineageOS-22-m14x
+          path: |
+            out/target/product/m14x/*.zip
+            out/target/product/m14x/*.img
