@@ -1,63 +1,54 @@
-name: GSI Slimmer to 500MB
-
+name: Build LineageOS 22 - m14x
 on:
   workflow_dispatch:
-    inputs:
-      file_url:
-        description: 'SourceForge Direct Download Link'
-        required: true
-        type: string
 
 jobs:
-  slim-and-compress:
-    runs-on: ubuntu-latest
+  build:
+    runs-on: ubuntu-22.04
     steps:
-      - name: Cleanup Runner
-        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc
+      - name: Maximize Build Space (Cleanup)
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 2048
+          swap-size-mb: 16384 # 16GB Swap is required for Android 15 linking
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+          remove-codeql: 'true'
+          remove-docker-images: 'true'
 
-      - name: Install Tools
+      - name: Install Build Dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y android-sdk-libsparse-utils binwalk e2fsprogs
+          sudo apt update
+          sudo apt install -y bc build-essential flex g++-multilib gcc-multilib git gnupg gperf lib32ncurses5-dev lib32readline-dev lib32z1-dev liblz4-tool libncurses5 libncurses5-dev libsdl1.2-dev libssl-dev libxml2 libxml2-utils lzop pngcrush rsync schedtool squashfs-tools xsltproc zip zlib1g-dev python3 git-lfs
 
-      - name: Download and Prepare Image
+      - name: Setup Repo Tool
         run: |
-          wget -L -O input.img "${{ github.event.inputs.file_url }}"
-          # Convert Sparse to Raw
-          simg2img input.img raw_system.img || mv input.img raw_system.img
+          mkdir -p ~/bin
+          curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
+          chmod a+x ~/bin/repo
+          sudo ln -sf ~/bin/repo /usr/bin/repo
 
-      - name: Mount and Slimming
+      - name: Sync Source Code
         run: |
-          mkdir -p mnt
-          # Many GSIs have an offset. We try to mount directly first; if it fails, we use loop.
-          sudo mount -o loop,rw raw_system.img mnt || sudo mount -o loop,offset=1048576,rw raw_system.img mnt
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          repo init -u https://github.com/LineageOS/android.git -b lineage-22.0 --git-lfs --depth=1
           
-          # DELETE THE BIGGEST OFFENDERS
-          sudo rm -rf mnt/system/product/app/YouTube || true
-          sudo rm -rf mnt/system/product/app/Chrome || true
-          sudo rm -rf mnt/system/product/app/Maps || true
-          sudo rm -rf mnt/system/media/video/* || true
+          # Clone your device tree into the correct path
+          git clone https://github.com/devhunter1/android_device_samsung_m14x -b lineage-22.2 device/samsung/m14x
           
-          # OPTIONAL: Remove extra fonts/sounds if still too big
-          # sudo rm -rf mnt/system/media/audio/notifications/* || true
-          
-          sudo umount mnt
+          # Sync only necessary projects to save space
+          repo sync -c -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
-      - name: Shrink Filesystem
+      - name: Build ROM
         run: |
-          # This removes the "empty air" we just created by deleting files
-          e2fsck -f -y raw_system.img
-          resize2fs -M raw_system.img
+          source build/envsetup.sh
+          lunch lineage_m14x-ap3a-userdebug
+          mka bacon -j$(nproc --all)
 
-      - name: Ultra Compression (256MB Dictionary)
-        run: |
-          # -mx=9: Ultra
-          # -md=256m: Max dictionary for best results
-          7z a -mx=9 -m0=lzma2 -md=256m -mfb=273 -ms=on gsi_500mb.7z raw_system.img
-          echo "Final size: $(du -h gsi_500mb.7z)"
-
-      - name: Upload
+      - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ultra-slim-gsi
-          path: gsi_500mb.7z
+          name: LineageOS-m14x-Build
+          path: out/target/product/m14x/*.zip
