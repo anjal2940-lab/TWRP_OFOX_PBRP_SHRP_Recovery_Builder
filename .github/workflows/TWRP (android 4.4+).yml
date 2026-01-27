@@ -1,36 +1,40 @@
-name: Build TWRP - Oppo A31t
+name: Build TWRP - Oppo A31t (Ubuntu Latest)
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
 
     - name: Cleanup and Setup Environment
       run: |
         sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /usr/local/lib/android /opt/ghc
         sudo apt-get update
-        sudo apt-get install -y bc build-essential zip curl libc6-dev libncurses5-dev libssl-dev python3 python2-is-python2
+        # Manual Python 2 install for Ubuntu 22.04+ compatibility
+        sudo apt-get install -y bc build-essential zip curl libc6-dev libncurses5-dev libssl-dev python3
+        sudo apt-get install -y python2-is-python2 || (sudo apt-get install -y python2 && sudo ln -sf /usr/bin/python2 /usr/bin/python)
+        
         git config --global user.email "twrp-build@github.com"
         git config --global user.name "AI-Builder"
 
     - name: Install Repo Tool
       run: |
-        mkdir ~/bin
+        mkdir -p ~/bin
         curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
         chmod a+x ~/bin/repo
-        sudo ln -sf ~/bin/repo /usr/bin/repo
+        echo "$HOME/bin" >> $GITHUB_PATH
 
-    - name: Initialize TWRP Source (Minimal Manifest)
+    - name: Initialize TWRP Source
       run: |
         mkdir ~/twrp
         cd ~/twrp
         repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-9.0
-        repo sync -j$(nproc --all)
+        # -f and --force-sync help handle network drops/sync errors
+        repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
 
     - name: Clone Device Tree
       run: |
@@ -46,7 +50,7 @@ jobs:
         make recoveryimage -j$(nproc --all)
 
     - name: Upload TWRP Build
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: TWRP-9.0-a31t
         path: |
