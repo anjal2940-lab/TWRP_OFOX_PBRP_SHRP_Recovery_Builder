@@ -3,27 +3,31 @@ on:
   workflow_dispatch:
     inputs:
       tunnel_url:
-        description: 'Your tunnel URL (without trailing slash)'
+        description: 'Your tunnel URL'
         required: true
-        default: 'https://1e7d77c40340cb.lhr.life'
 
 jobs:
   download_and_upload:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Needed to create the Release
+      contents: write
     steps:
       - name: Download from Termux
         run: |
-          # We use -L to follow redirects and -o to name the output
-          curl -L "${{ github.event.inputs.tunnel_url }}/vendor_final.img" -o vendor_final.img
+          # --keepalive helps maintain the connection
+          # --retry 10 will keep trying if the pipe breaks
+          curl -L -v -H "bypass-tunnel-reminder: true" \
+          --keepalive-time 60 \
+          --retry 10 \
+          --retry-delay 5 \
+          "${{ github.event.inputs.tunnel_url }}/vendor_final.img" \
+          -o vendor_final.img
           
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: "v1.0.0"
-          name: "Vendor Image Export"
-          body: "Transfer completed from Termux tunnel."
+          tag_name: "v1.5.0"
+          name: "Final Vendor Image"
           files: vendor_final.img
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
