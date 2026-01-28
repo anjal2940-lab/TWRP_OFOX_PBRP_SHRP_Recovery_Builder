@@ -1,58 +1,29 @@
-name: Build TWRP - Oppo A31t (Ubuntu Latest)
-
-on:
+name: Remote File Pull
+on: 
   workflow_dispatch:
+    inputs:
+      tunnel_url:
+        description: 'Your tunnel URL (without trailing slash)'
+        required: true
+        default: 'https://1e7d77c40340cb.lhr.life'
 
 jobs:
-  build:
+  download_and_upload:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # Needed to create the Release
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
-    - name: Cleanup and Setup Environment
-      run: |
-        sudo rm -rf /usr/share/dotnet /etc/mysql /etc/php /usr/local/lib/android /opt/ghc
-        sudo apt-get update
-        # Manual Python 2 install for Ubuntu 22.04+ compatibility
-        sudo apt-get install -y bc build-essential zip curl libc6-dev libncurses5-dev libssl-dev python3
-        sudo apt-get install -y python2-is-python2 || (sudo apt-get install -y python2 && sudo ln -sf /usr/bin/python2 /usr/bin/python)
-        
-        git config --global user.email "twrp-build@github.com"
-        git config --global user.name "AI-Builder"
-
-    - name: Install Repo Tool
-      run: |
-        mkdir -p ~/bin
-        curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
-        chmod a+x ~/bin/repo
-        echo "$HOME/bin" >> $GITHUB_PATH
-
-    - name: Initialize TWRP Source
-      run: |
-        mkdir ~/twrp
-        cd ~/twrp
-        repo init --depth=1 -u https://github.com/minimal-manifest-twrp/platform_manifest_twrp_omni.git -b twrp-9.0
-        # -f and --force-sync help handle network drops/sync errors
-        repo sync -j$(nproc --all) --force-sync --no-clone-bundle --no-tags
-
-    - name: Clone Device Tree
-      run: |
-        cd ~/twrp
-        git clone https://github.com/oppo-a31-revive/android_device_oppo_a31t-twrp device/oppo/a31t
-
-    - name: Build Recovery Image
-      run: |
-        cd ~/twrp
-        export ALLOW_MISSING_DEPENDENCIES=true
-        source build/envsetup.sh
-        lunch omni_a31t-eng
-        make recoveryimage -j$(nproc --all)
-
-    - name: Upload TWRP Build
-      uses: actions/upload-artifact@v4
-      with:
-        name: TWRP-9.0-a31t
-        path: |
-          /home/runner/twrp/out/target/product/a31t/recovery.img
-          /home/runner/twrp/out/target/product/a31t/recovery.tar
+      - name: Download from Termux
+        run: |
+          # We use -L to follow redirects and -o to name the output
+          curl -L "${{ github.event.inputs.tunnel_url }}/vendor_final.img" -o vendor_final.img
+          
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: "v1.0.0"
+          name: "Vendor Image Export"
+          body: "Transfer completed from Termux tunnel."
+          files: vendor_final.img
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
